@@ -175,6 +175,9 @@ move into this family too?] An overview of each message type follows. The
 [Reference](#reference) section of this HIPE contains a detailed explanation
 of each field of each message; here in the Tutorial, we will focus on just
 a rough description.
+
+> Stephen: I'm not a fan of the "us" terminology. Not specific reason why, but it doesn't feel right. I think "group" seems better,
+> but I also see why that wouldn't necessarily be favored - the main use case of a pair is not commonly called a "group".
  
 ##### `join_us`
 
@@ -280,6 +283,10 @@ of Alice's state Bob has seen:
 
 [TODO: should "sha256" be a merkle root instead?]
 
+> **Stephen**: Is there a well-known standard (comparable to sha256) for the definition of a merkle root?
+> I don't think it makes it "more verified" to have a merkle root, so I'm not sure of what the benefit would be.
+> If more tamper detection is necessary, maybe put the sha256 of the previous version into the doc and make a chain of doc versions?
+
 This `join_us` message is known to be a response because of the use of [message threading](
 https://github.com/hyperledger/indy-hipe/blob/7bd05ee7191d5175dd6606bb5851980076b310aa/text/message-threading/README.md).
 However, even without `@thread`, this is implicitly a reply of sorts, because it acknowledges
@@ -289,6 +296,10 @@ Once every party has joined a relationship, it is considered established. Howeve
 relationship can be upgraded to n-wise, or an n-wise relationship can add participants, by
 having the new member issue a `join_us` message of their own, and by receiving acknowledgments
 of the same.
+
+> **Stephen**: The mulit-way version of this seems not obvious. If Carol sends a `join-us` to Bob and Alice, isn't she just creating two new groups?
+> She would not know values for the thread, `us` or `you`, so could not just join the conversation. I've only read
+> to this point so am guessing the later message types enable this (`introduce` maybe?)
 
 ##### `leave_us`
 
@@ -361,13 +372,22 @@ want that--it would be a security disaster. But we don't technically need one
 change per message to prevent it; we just need all the changes in a given
 message to share a common authorization.]
 
+> **Stephen**: Daniel Buchner has been talking in DIF about JSON-Patch - https://www.npmjs.com/package/fast-json-patch is an implementation,
+>  but has links to the standard and usage examples. It's an IETF RFC - https://tools.ietf.org/html/rfc6902.
+
 [TODO: do we need timestamping anywhere in here, so we communicate *when* transitions
 were applied?]
+
+> **Stephen**: I would say yes - set by the DID owner. Everything sent before the timestamp should be signed by
+> the previous version of the DIDDoc, everything after by the new version.
 
 [TODO: How is signing handled? Do we need any signature other than what authcrypt
 provides, so we can later display a signature to prove to the other party that our
 view of their state is accurate? Merkle roots... Need to reconcile this against
 Lovesh's microledger ideas...]
+
+> **Stephen**: I think message signing is sufficient. A lot of effort has been put into making all signed, so there should not be
+> a reason to add another layer of signing here.
 
 ##### `my_view`
 
@@ -413,6 +433,15 @@ by sending a `problem-report` where `explain_l10n.code` = `update-not-authorized
   "explain_l10n": { "code": "update-not-authorized" }
 }
 ```
+
+> **Stephen**: This is where the use of `problem-report` gets interesting to me. My (possibly naïve)
+> view of the use of `problem-report` here is that the agent message dispatcher will send this
+> message to a generic `problem-report` handler, and the context about what was being attempted
+> will not be (easily) available to the handler - and the response will be disconnected from the fairly
+> obvious result. If instead there was a specific `relmgmt` message type for this response, the agent
+> message dispatcher would send the message to a hander that had the context for the message.
+> 
+> Not to say this couldn't be done with `problem-report`, but it would seem to be more difficult.
 
 
 ##### `query_view`
@@ -468,6 +497,8 @@ the response would fill out both the `me` (Bob) and `you` (Alice) sections. In a
 n-wise relationship among 4 siblings, Sibling #1 could ask Sibling #2 what her view
 of Siblings 1, 3, and 4 is--and get back 3 entries under the `you` section.
 
+> **Stephen**: Maybe it should be `me` and `not-me`?  :-)
+
 ### Multiple Agents and Cooperative Synchronization
 
 The significance of the error situation described above, where Alice attempts a key
@@ -496,11 +527,16 @@ the phone's keys from the list of authorized keys. If Alice later finds the phon
 tries to use it to send Bob a message, she should get a `problem_report` message as
 described above, explaining that this operation looks invalid from Bob's perspective.
 
+> **Stephen**: The `problem-report` mentioned here is (I think) different from the one
+> "described above" and likely those words should be lost. In this case, Alice is not
+> necessarily trying to change the DIDDoc, but sending *any* message from the phone. Any
+> of them should be rejected until the tablet reactivates the phone as part of the relationship.
+
 Both of these examples show that the responsibility for communicating about the state
-of a relationship is not easily partitioned. Bob should do what he can to tell his
+of a relationship is not easily partitioned. Bob must do what he can to tell his
 agents about any changes he makes, *and also* about any changes that Alice makes.
-And he should be helpful about informing Alice's agents if he knows more about the
-relationship state than they do. Alice should do the same. If both engage in cooperative
+And he must be helpful about informing Alice's agents if he knows more about the
+relationship state than they do. Alice must do the same. If both engage in cooperative
 synchronization, then the overall knowledge about relationship state may not be
 perfect, but it will be good enough to function robustly.
 
@@ -510,7 +546,28 @@ up with a `query_view` to see what state it lacks. Bob's static agent may be abl
 and plug the gap by talking to Alice, even if Bob hasn't been able to update his own static
 agent directly.
 
-[TODO: go back and explain how we use Merkle roots with all messages in this family
+> **Stephen**: This implies there is an additional need for Agents within a domain to
+> query each other about the state of the relationship. I think the `query_view`/`my_view`
+> message/response will accomplish that, but the discussion should be implicit about the
+> need for that. We would not expect Bob's agents to call Alice to find out what updates
+> they missed that Bob has made.
+> 
+> There will be a need to send other messages that are part of the `relmgmt` family
+> within the domain - likely with additional, internal information, such as for routing. For
+> example, assuming we have no private key sharing, if Alice has a a relationship with Bob with
+> authorization from his tablet and wants to add an authorization from her phone, her tablet must
+> request a public key from the phone to add to the DIDDoc.
+> 
+> Do those need to be discussed in this document? Even if we are assuming imperfect synchronization
+> within the domain, we need mechanisms to try to achieve synchronization. Note that these
+> are possibly not necessary for synchronization.
+> 
+> **Further Aside**: I have heard discussion from some of the use of a relay model where Alice has a cloud agent
+> that is known to others and handles all messaging - forwarding them to Alice's "devices" for handling. This is
+> considered aligned with the iMessage or WhatsApp models. I think this model is completely aligned with what
+> you have here, but just raise it for awareness rather than action.
+
+[TODO: go back and explain how we use Merkle roots with all messages in this family]
 
 ##### Split Brain
 
